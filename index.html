@@ -177,6 +177,7 @@ textarea:focus,input:focus-visible{outline:2px solid var(--go)}
   <h3>Kesan</h3><div class="presets" id="presetB"></div>
   <h3>Lawak & haiwan</h3><div class="presets" id="presetC"></div>
   <div class="row"><label for="kRate">Nada <output id="oRate"></output></label><input id="kRate" type="range" min="0.6" max="1.6" step="0.01"><p>Rendah = garau dan perlahan. Tinggi = nyaring dan laju.</p></div>
+  <div class="row"><label for="kSpeed">Laju <output id="oSpeed"></output></label><input id="kSpeed" type="range" min="0.6" max="1.6" step="0.05"><p>Laju atau perlahan bacaan, nada suara kekal.</p></div>
   <div class="row"><label for="kPitch">Garau tanpa lambat <output id="oPitch"></output></label><input id="kPitch" type="range" min="-8" max="8" step="0.5"><p>Ubah nada suara, laju bacaan kekal.</p></div>
   <div class="row"><label for="kBass">Bass <output id="oBass"></output></label><input id="kBass" type="range" min="-12" max="12" step="1"></div>
   <div class="row"><label for="kTreble">Treble <output id="oTreble"></output></label><input id="kTreble" type="range" min="-12" max="12" step="1"></div>
@@ -252,7 +253,7 @@ const hashKey=(n,l)=>{let h=0;const s=n+"|"+l.join("\n");for(let k=0;k<s.length;
 const BE_ID=hashKey(BE_NAME,BE_LINES); // same key earlier versions used, so old recordings stay attached
 
 // ---------- tune presets ----------
-const BASE={rate:1,pitch:0,mud:0,hp:70,lp:16000,bass:0,mid:0,treble:0,drive:0,ring:0,ringHz:50,verb:0,verbLen:1.2,echo:0,echoT:0.28,vib:0,vibHz:6,trem:0,tremHz:6,gain:1,comp:true};
+const BASE={rate:1,speed:1,pitch:0,mud:0,hp:70,lp:16000,bass:0,mid:0,treble:0,drive:0,ring:0,ringHz:50,verb:0,verbLen:1.2,echo:0,echoT:0.28,vib:0,vibHz:6,trem:0,tremHz:6,gain:1,comp:true};
 const PRESETS=[
  {g:"A",id:"asli",name:"Asli",d:"Tanpa kesan",p:{comp:false}},
  {g:"A",id:"jelas",name:"Jelas",d:"Sebutan terang",p:{hp:90,bass:1,mid:2,treble:5,gain:1.2}},
@@ -336,7 +337,7 @@ function makeImpulse(c,sec){const len=Math.max(1,Math.floor(c.sampleRate*sec));c
   for(let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let k=0;k<len;k++)d[k]=(Math.random()*2-1)*Math.pow(1-k/len,3);}return ir;}
 function driveCurve(amt){const n=1024,c=new Float32Array(n),k=amt*60;for(let x=0;x<n;x++){const v=x*2/n-1;c[x]=(1+k)*v/(1+k*Math.abs(v));}return c;}
 function lfo(c,hz,depth,target,startAt){const o=c.createOscillator();o.frequency.value=hz;const g=c.createGain();g.gain.value=depth;o.connect(g);g.connect(target);o.start(startAt||0);}
-// Pitch without changing speed: squeeze/stretch the clip in time (WSOLA), then play it faster/slower by the same factor.
+// Pitch and speed apart: squeeze/stretch the clip in time (WSOLA) by pitch/speed, then play it at the pitch factor.
 const pf=p=>Math.pow(2,(p.pitch||0)/12);
 const effRate=p=>p.rate*pf(p);
 const pitchCache=new WeakMap();
@@ -359,12 +360,12 @@ function wsola(x,alpha,sr){
   return out;
 }
 function pitchPrep(c,buf,p){
-  if(!buf||!p.pitch) return buf;
+  const f=pf(p)/(p.speed||1); if(!buf||Math.abs(f-1)<1e-3) return buf;
   let m=pitchCache.get(buf); if(!m){m={};pitchCache.set(buf,m);}
-  if(m[p.pitch]) return m[p.pitch];
-  const f=pf(p), sr=buf.sampleRate, nb=c.createBuffer(buf.numberOfChannels,Math.max(1,Math.floor(buf.length*f)),sr);
+  const key=f.toFixed(4); if(m[key]) return m[key];
+  const sr=buf.sampleRate, nb=c.createBuffer(buf.numberOfChannels,Math.max(1,Math.floor(buf.length*f)),sr);
   for(let ch=0;ch<buf.numberOfChannels;ch++)nb.copyToChannel(wsola(buf.getChannelData(ch),f,sr).subarray(0,nb.length),ch);
-  return m[p.pitch]=nb;
+  return m[key]=nb;
 }
 // Effect chain for one source into `dest`.
 function chain(c,src,p,dest,startAt){
@@ -823,6 +824,7 @@ function renderTune(){
       b.append(p.name);const sm=document.createElement("small");sm.textContent=p.d;b.append(sm);
       b.onclick=()=>{presetId=p.id;tune=Object.assign({},BASE,p.p);saveTune();renderTune();previewTune();};box.append(b);});});
   $("kRate").value=tune.rate;$("oRate").textContent=tune.rate.toFixed(2)+"×";
+  $("kSpeed").value=tune.speed||1;$("oSpeed").textContent=(tune.speed||1).toFixed(2)+"×";
   $("kPitch").value=tune.pitch||0;$("oPitch").textContent=(tune.pitch>0?"+":"")+(tune.pitch||0)+" nada";
   $("kBass").value=tune.bass;$("oBass").textContent=(tune.bass>0?"+":"")+tune.bass+" dB";
   $("kTreble").value=tune.treble;$("oTreble").textContent=(tune.treble>0?"+":"")+tune.treble+" dB";
@@ -833,7 +835,7 @@ function renderTune(){
 }
 function saveTune(){LS.set("tune",tune);LS.set("preset",presetId);syncTunePill();}
 const knob=(id,apply)=>{$(id).oninput=e=>{apply(+e.target.value);presetId="custom";saveTune();renderTune();};$(id).onchange=()=>previewTune();};
-knob("kRate",v=>tune.rate=v);knob("kPitch",v=>tune.pitch=v);knob("kBass",v=>tune.bass=v);knob("kTreble",v=>tune.treble=v);
+knob("kRate",v=>tune.rate=v);knob("kPitch",v=>tune.pitch=v);knob("kSpeed",v=>tune.speed=v);knob("kBass",v=>tune.bass=v);knob("kTreble",v=>tune.treble=v);
 knob("kVerb",v=>{tune.verb=v;if(!tune.verbLen)tune.verbLen=1.2;});knob("kEcho",v=>tune.echo=v);
 knob("kRobot",v=>{tune.ring=v;tune.comp=true;});knob("kVib",v=>{tune.vib=v*0.006;if(!tune.vibHz)tune.vibHz=6;});
 async function previewSource(){
