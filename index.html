@@ -177,6 +177,7 @@ textarea:focus,input:focus-visible{outline:2px solid var(--go)}
   <h3>Kesan</h3><div class="presets" id="presetB"></div>
   <h3>Lawak & haiwan</h3><div class="presets" id="presetC"></div>
   <div class="row"><label for="kRate">Nada <output id="oRate"></output></label><input id="kRate" type="range" min="0.6" max="1.6" step="0.01"><p>Rendah = garau dan perlahan. Tinggi = nyaring dan laju.</p></div>
+  <div class="row"><label for="kPitch">Garau tanpa lambat <output id="oPitch"></output></label><input id="kPitch" type="range" min="-8" max="8" step="0.5"><p>Ubah nada suara, laju bacaan kekal.</p></div>
   <div class="row"><label for="kBass">Bass <output id="oBass"></output></label><input id="kBass" type="range" min="-12" max="12" step="1"></div>
   <div class="row"><label for="kTreble">Treble <output id="oTreble"></output></label><input id="kTreble" type="range" min="-12" max="12" step="1"></div>
   <div class="row"><label for="kVerb">Gema bilik <output id="oVerb"></output></label><input id="kVerb" type="range" min="0" max="1" step="0.05"></div>
@@ -251,12 +252,13 @@ const hashKey=(n,l)=>{let h=0;const s=n+"|"+l.join("\n");for(let k=0;k<s.length;
 const BE_ID=hashKey(BE_NAME,BE_LINES); // same key earlier versions used, so old recordings stay attached
 
 // ---------- tune presets ----------
-const BASE={rate:1,hp:70,lp:16000,bass:0,mid:0,treble:0,drive:0,ring:0,ringHz:50,verb:0,verbLen:1.2,echo:0,echoT:0.28,vib:0,vibHz:6,trem:0,tremHz:6,gain:1,comp:true};
+const BASE={rate:1,pitch:0,mud:0,hp:70,lp:16000,bass:0,mid:0,treble:0,drive:0,ring:0,ringHz:50,verb:0,verbLen:1.2,echo:0,echoT:0.28,vib:0,vibHz:6,trem:0,tremHz:6,gain:1,comp:true};
 const PRESETS=[
  {g:"A",id:"asli",name:"Asli",d:"Tanpa kesan",p:{comp:false}},
  {g:"A",id:"jelas",name:"Jelas",d:"Sebutan terang",p:{hp:90,bass:1,mid:2,treble:5,gain:1.2}},
  {g:"A",id:"radio",name:"Radio",d:"DJ FM",p:{hp:80,bass:5,mid:3,treble:3,gain:1.3}},
  {g:"A",id:"garau",name:"Garau",d:"Dalam & tebal",p:{rate:0.92,bass:6,treble:-1,gain:1.2}},
+ {g:"A",id:"narator",name:"Narator",d:"Gaya dokumentari",p:{pitch:-3.5,hp:90,lp:8500,bass:-1,mud:-4,mid:7,treble:9,verb:0.1,verbLen:0.7,gain:1.25}},
  {g:"A",id:"nyaring",name:"Nyaring",d:"Muda & laju",p:{rate:1.08,bass:-2,treble:4}},
  {g:"B",id:"telefon",name:"Telefon",d:"Panggilan",p:{hp:400,lp:3400,mid:6,drive:0.25,gain:1.4}},
  {g:"B",id:"walkie",name:"Walkie",d:"Walkie-talkie",p:{hp:600,lp:2800,mid:8,drive:0.6,gain:1.3}},
@@ -334,15 +336,46 @@ function makeImpulse(c,sec){const len=Math.max(1,Math.floor(c.sampleRate*sec));c
   for(let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let k=0;k<len;k++)d[k]=(Math.random()*2-1)*Math.pow(1-k/len,3);}return ir;}
 function driveCurve(amt){const n=1024,c=new Float32Array(n),k=amt*60;for(let x=0;x<n;x++){const v=x*2/n-1;c[x]=(1+k)*v/(1+k*Math.abs(v));}return c;}
 function lfo(c,hz,depth,target,startAt){const o=c.createOscillator();o.frequency.value=hz;const g=c.createGain();g.gain.value=depth;o.connect(g);g.connect(target);o.start(startAt||0);}
+// Pitch without changing speed: squeeze/stretch the clip in time (WSOLA), then play it faster/slower by the same factor.
+const pf=p=>Math.pow(2,(p.pitch||0)/12);
+const effRate=p=>p.rate*pf(p);
+const pitchCache=new WeakMap();
+function wsola(x,alpha,sr){
+  const N=Math.round(0.04*sr)&~1, Hs=N>>1, Ha=Hs/alpha, tol=Math.round(0.012*sr), outLen=Math.floor(x.length*alpha);
+  const y=new Float32Array(outLen+N), wsum=new Float32Array(outLen+N), win=new Float32Array(N);
+  for(let k=0;k<N;k++)win[k]=0.5-0.5*Math.cos(2*Math.PI*k/N);
+  const at=i=>(i>=0&&i<x.length)?x[i]:0;
+  let prev=0;
+  for(let m=0;m*Hs<outLen;m++){
+    const nom=Math.round(m*Ha); let best=nom;
+    if(m>0){const ref=prev+Hs; let bc=-Infinity;
+      const score=d=>{let c=0;for(let k=0;k<Hs;k+=4)c+=at(ref+k)*at(nom+d+k);return c;};
+      let bd=0;for(let d=-tol;d<=tol;d+=4){const c=score(d);if(c>bc){bc=c;bd=d;}}
+      best=nom+bd;for(let d=bd-3;d<=bd+3;d++){const c=score(d);if(c>bc){bc=c;best=nom+d;}}}
+    const o=m*Hs; for(let k=0;k<N;k++){y[o+k]+=at(best+k)*win[k];wsum[o+k]+=win[k];}
+    prev=best;
+  }
+  const out=new Float32Array(outLen); for(let k=0;k<outLen;k++)out[k]=wsum[k]>1e-3?y[k]/wsum[k]:y[k];
+  return out;
+}
+function pitchPrep(c,buf,p){
+  if(!buf||!p.pitch) return buf;
+  let m=pitchCache.get(buf); if(!m){m={};pitchCache.set(buf,m);}
+  if(m[p.pitch]) return m[p.pitch];
+  const f=pf(p), sr=buf.sampleRate, nb=c.createBuffer(buf.numberOfChannels,Math.max(1,Math.floor(buf.length*f)),sr);
+  for(let ch=0;ch<buf.numberOfChannels;ch++)nb.copyToChannel(wsola(buf.getChannelData(ch),f,sr).subarray(0,nb.length),ch);
+  return m[p.pitch]=nb;
+}
 // Effect chain for one source into `dest`.
 function chain(c,src,p,dest,startAt){
-  src.playbackRate.value=p.rate;
+  src.playbackRate.value=effRate(p);
   const hp=c.createBiquadFilter();hp.type="highpass";hp.frequency.value=p.hp;
   const lp=c.createBiquadFilter();lp.type="lowpass";lp.frequency.value=Math.min(p.lp,c.sampleRate/2-100);
   const bs=c.createBiquadFilter();bs.type="lowshelf";bs.frequency.value=200;bs.gain.value=p.bass;
+  const mu=c.createBiquadFilter();mu.type="peaking";mu.frequency.value=400;mu.Q.value=1;mu.gain.value=p.mud||0;
   const md=c.createBiquadFilter();md.type="peaking";md.frequency.value=1800;md.Q.value=0.8;md.gain.value=p.mid;
   const tr=c.createBiquadFilter();tr.type="highshelf";tr.frequency.value=3500;tr.gain.value=p.treble;
-  src.connect(hp);hp.connect(lp);lp.connect(bs);bs.connect(md);md.connect(tr);
+  src.connect(hp);hp.connect(lp);lp.connect(bs);bs.connect(mu);mu.connect(md);md.connect(tr);
   let node=tr;
   if(p.vib>0){const d=c.createDelay(0.1);d.delayTime.value=0.012;lfo(c,p.vibHz,p.vib,d.delayTime,startAt);node.connect(d);node=d;}
   if(p.drive>0){const ws=c.createWaveShaper();ws.curve=driveCurve(p.drive);ws.oversample="2x";node.connect(ws);node=ws;}
@@ -359,7 +392,7 @@ let liveSrc=null, liveOwner=null;
 function stopAudio(){try{liveSrc&&liveSrc.stop();}catch(e){} liveSrc=null; const o=liveOwner; liveOwner=null; o&&o();}
 function playBuffer(buf,done,owner){
   stopAudio(); if(!buf){done&&done(false);return;}
-  const c=getCtx(), s=c.createBufferSource(); s.buffer=buf; chain(c,s,tune,c.destination,0);
+  const c=getCtx(), s=c.createBufferSource(); s.buffer=pitchPrep(c,buf,tune); chain(c,s,tune,c.destination,0);
   s.onended=()=>{if(liveSrc===s){liveSrc=null;const o=liveOwner;liveOwner=null;o&&o();done&&done(true);}};
   liveSrc=s; liveOwner=owner||null; s.start();
 }
@@ -367,10 +400,11 @@ async function playLine(n,done){playBuffer(await clipBuffer(n),done);}
 async function renderBuffers(bufs,gapSec){
   bufs=bufs.filter(Boolean); if(!bufs.length) return null;
   const sr=44100, tail=(tune.verb>0||tune.echo>0)?Math.max(tune.verbLen,1.5):0.3;
-  let total=0.05;for(const b of bufs)total+=b.duration/tune.rate+gapSec; total+=tail;
+  const r=effRate(tune); bufs=bufs.map(b=>pitchPrep(getCtx(),b,tune));
+  let total=0.05;for(const b of bufs)total+=b.duration/r+gapSec; total+=tail;
   const OC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
   const oc=new OC(1,Math.ceil(total*sr),sr); let t=0.05;
-  for(const b of bufs){const s=oc.createBufferSource();s.buffer=b;chain(oc,s,tune,oc.destination,t);s.start(t);t+=b.duration/tune.rate+gapSec;}
+  for(const b of bufs){const s=oc.createBufferSource();s.buffer=b;chain(oc,s,tune,oc.destination,t);s.start(t);t+=b.duration/r+gapSec;}
   return await oc.startRendering();
 }
 function encodeWav(buf){
@@ -789,6 +823,7 @@ function renderTune(){
       b.append(p.name);const sm=document.createElement("small");sm.textContent=p.d;b.append(sm);
       b.onclick=()=>{presetId=p.id;tune=Object.assign({},BASE,p.p);saveTune();renderTune();previewTune();};box.append(b);});});
   $("kRate").value=tune.rate;$("oRate").textContent=tune.rate.toFixed(2)+"×";
+  $("kPitch").value=tune.pitch||0;$("oPitch").textContent=(tune.pitch>0?"+":"")+(tune.pitch||0)+" nada";
   $("kBass").value=tune.bass;$("oBass").textContent=(tune.bass>0?"+":"")+tune.bass+" dB";
   $("kTreble").value=tune.treble;$("oTreble").textContent=(tune.treble>0?"+":"")+tune.treble+" dB";
   $("kVerb").value=tune.verb;$("oVerb").textContent=Math.round(tune.verb*100)+"%";
@@ -798,7 +833,7 @@ function renderTune(){
 }
 function saveTune(){LS.set("tune",tune);LS.set("preset",presetId);syncTunePill();}
 const knob=(id,apply)=>{$(id).oninput=e=>{apply(+e.target.value);presetId="custom";saveTune();renderTune();};$(id).onchange=()=>previewTune();};
-knob("kRate",v=>tune.rate=v);knob("kBass",v=>tune.bass=v);knob("kTreble",v=>tune.treble=v);
+knob("kRate",v=>tune.rate=v);knob("kPitch",v=>tune.pitch=v);knob("kBass",v=>tune.bass=v);knob("kTreble",v=>tune.treble=v);
 knob("kVerb",v=>{tune.verb=v;if(!tune.verbLen)tune.verbLen=1.2;});knob("kEcho",v=>tune.echo=v);
 knob("kRobot",v=>{tune.ring=v;tune.comp=true;});knob("kVib",v=>{tune.vib=v*0.006;if(!tune.vibHz)tune.vibHz=6;});
 async function previewSource(){
