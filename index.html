@@ -1,0 +1,821 @@
+<!doctype html><html lang="ms"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<script>window.__NO_BUILTIN=true;</script>
+<title>Teleprompter Bedah Enjin</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen reader. Top bar (title, tabs), big line in the middle, record + transport controls at the bottom. Script library, line voices, recordings library, tune and settings open as full-screen panels. Single dark look to match the Bedah Enjin video. */
+:root{
+  --bg:#0e1821; --card:#152532; --card2:#1b2f3f; --ink:#e9eef2; --muted:#8aa0b1; --line:#2a3c4b;
+  --amber:#f3a63b; --go:#5fb8e8; --stop:#ff6a2b; --rec:#ff4d4d; --ok:#6fcf8f;
+  --display:"Barlow Condensed","TeX Gyre Heros Cn","Arial Narrow",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --fs:48px;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink)}
+body{display:flex;flex-direction:column;gap:9px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px;box-sizing:border-box;font-family:var(--mono)}
+header{display:flex;flex-direction:column;gap:8px}
+h1{font:800 22px/1 var(--display);letter-spacing:1.5px;margin:0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button{font:600 13px/1 var(--display);padding:8px 9px;border-radius:8px;letter-spacing:.5px}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+#count{font:500 13px/1 var(--mono);color:var(--amber);font-variant-numeric:tabular-nums}
+.pill{font:500 12px/1 var(--mono);padding:5px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+.pill.has{border-color:var(--ok);color:var(--ok)}
+.pill.tune{border-color:var(--go);color:var(--go);cursor:pointer;background:transparent}
+.rec-pill{border-color:var(--rec)!important;color:var(--rec)!important;font-variant-numeric:tabular-nums}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--amber);transition:width .3s}
+#stage{flex:1;display:flex;flex-direction:column;justify-content:safe center;gap:14px;min-height:0;overflow:auto;cursor:pointer;-webkit-user-select:none;user-select:none}
+#tone{font:600 14px/1.2 var(--mono);color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+#text{font:800 var(--fs)/1.12 var(--display);letter-spacing:.5px;text-wrap:balance;margin:0;transition:opacity .2s}
+#text b{color:var(--amber)}
+body.recording #stage{box-shadow:inset 0 0 0 3px var(--rec);border-radius:12px;padding:10px}
+#pause{font:800 34px/1 var(--display);color:var(--stop);letter-spacing:2px}
+#next{font:500 14px/1.4 var(--mono);color:var(--muted);border-top:1px solid var(--line);padding-top:10px;min-height:2.8em}
+.intro{display:flex;flex-direction:column;gap:10px;font:400 15px/1.5 var(--mono)}
+.intro ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px}
+.intro .note{color:var(--muted);margin:0}
+.ctl{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px}
+.ctl2{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+button{font:700 17px/1 var(--display);letter-spacing:1px;text-transform:uppercase;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:14px 10px;cursor:pointer;text-align:center}
+button.primary{background:var(--amber);color:#14202b;border-color:var(--amber)}
+button.ghost{background:transparent;border-color:var(--go);color:var(--go)}
+button.recbtn{background:transparent;border-color:var(--rec);color:var(--rec)}
+button.recbtn[aria-pressed="true"]{background:var(--rec);color:#fff}
+button.danger{color:var(--rec);border-color:var(--rec);background:transparent}
+button[aria-pressed="true"]:not(.recbtn){background:var(--stop);border-color:var(--stop);color:#14202b}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible{outline:2px solid var(--go);outline-offset:2px}
+#status{font:400 12px/1.4 var(--mono);color:var(--muted);min-height:1.4em;margin:0}
+.panel{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;gap:12px;padding:calc(14px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(14px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));overflow:auto;z-index:5}
+.panel h2{font:800 24px/1 var(--display);letter-spacing:2px;margin:0}
+.panel h3{font:700 16px/1 var(--display);letter-spacing:1.5px;margin:6px 0 0;color:var(--muted);text-transform:uppercase}
+.panel p{margin:0;font:400 13px/1.5 var(--mono);color:var(--muted)}
+.pstatus{color:var(--amber)!important;min-height:1.2em}
+.row{display:flex;flex-direction:column;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.row label{font:600 15px/1.2 var(--display);letter-spacing:1px;text-transform:uppercase;display:flex;justify-content:space-between;gap:8px}
+.row output{color:var(--amber);font-family:var(--mono);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--amber)}
+input[type=text]{font:500 15px var(--mono);background:var(--card2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0}
+.switch{display:flex;align-items:center;gap:10px;font:600 15px/1.2 var(--display);letter-spacing:1px;text-transform:uppercase}
+.switch input{width:22px;height:22px;accent-color:var(--amber)}
+textarea{width:100%;box-sizing:border-box;min-height:36vh;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;font:400 15px/1.5 var(--mono);resize:vertical}
+textarea:focus,input:focus-visible{outline:2px solid var(--go)}
+.list{display:flex;flex-direction:column;gap:6px}
+.item{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+.item.active{border-color:var(--amber)}
+.item .n{font:500 13px/1 var(--mono);color:var(--amber)}
+.item .t{font:500 13px/1.35 var(--mono);min-width:0;overflow-wrap:anywhere}
+.item .t small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.item .acts{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.item button{font-size:14px;padding:8px 10px}
+.presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:8px}
+.presets button{font-size:15px;padding:11px 6px;display:flex;flex-direction:column;gap:4px;align-items:center}
+.presets button small{font:400 10px/1.2 var(--mono);text-transform:none;letter-spacing:0;color:var(--muted)}
+.presets button[aria-pressed="true"] small{color:#14202b}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+[hidden]{display:none!important}
+</style>
+
+<header>
+  <div class="meta"><h1>TELEPROMPTER</h1><button id="tunePill" type="button" class="pill tune">Tune: Asli</button></div>
+  <div class="tabs">
+    <button id="tSkrip" type="button">Skrip</button>
+    <button id="tAyat" type="button">Suara ayat</button>
+    <button id="tRakaman" type="button">Rakaman</button>
+    <button id="tTune" type="button">Tune</button>
+    <button id="tSet" type="button">Tetapan</button>
+  </div>
+</header>
+<div class="meta"><span id="count">Sedia</span><span id="recInd" class="pill rec-pill" hidden>● REC 0:00</span></div>
+<div class="bar"><i id="prog"></i></div>
+
+<main id="stage" aria-live="polite">
+  <div class="intro" id="intro">
+    <ol>
+      <li>Tekan <b>● Rakam</b>. Page akan rakam ayat yang keluar.</li>
+      <li>Habis baca, tekan <b>Seterusnya</b>. Rakaman disimpan dan ayat baru mula dirakam selepas jeda.</li>
+      <li>Tekan <b>■ Henti rakam</b> untuk berhenti.</li>
+      <li><b>Skrip</b>: simpan banyak skrip. <b>Rakaman</b>: upload atau rakam suara penuh, tune, dan download.</li>
+    </ol>
+    <p class="note">Tersasul? Tekan <b>Ulang</b> untuk rakam semula ayat itu. Page ingat ayat terakhir bagi setiap skrip.</p>
+  </div>
+  <div id="read" hidden>
+    <div class="meta"><span id="tone"></span><span id="voTag" class="pill">Tiada suara</span></div>
+    <p id="text"></p>
+    <div id="pause" hidden></div>
+    <div id="next"></div>
+  </div>
+</main>
+
+<div class="ctl">
+  <button id="bBack" type="button" disabled>Undur</button>
+  <button id="bRedo" type="button" disabled>Ulang</button>
+  <button id="bGo" type="button" class="primary">Mula</button>
+</div>
+<div class="ctl2">
+  <button id="bRec" type="button" class="recbtn" aria-pressed="false">● Rakam</button>
+  <button id="bPlay1" type="button" class="ghost">▶ Dengar</button>
+</div>
+<p id="status"></p>
+
+<!-- Script library -->
+<section class="panel" id="pSkrip" hidden aria-label="Perpustakaan skrip">
+  <h2>PERPUSTAKAAN SKRIP</h2>
+  <p>Setiap skrip simpan rakaman ayat dan kedudukan bacaan sendiri. Ketik <b>Guna</b> untuk tukar.</p>
+  <button id="bNewScript" type="button" class="primary">+ Skrip baru</button>
+  <div class="list" id="scriptList"></div>
+  <div id="editor" hidden class="row">
+    <label for="nameIn" id="edTitle">Skrip baru</label>
+    <input id="nameIn" type="text" placeholder="Nama skrip, contoh: Bedah Lif">
+    <p>Satu ayat satu baris. Letak * selepas nama komponen untuk warna oren, contoh: <b>Aci sesondol*, menolak injap…</b></p>
+    <textarea id="scriptIn" spellcheck="false"></textarea>
+    <p id="edWarn" hidden>Rakaman ayat disimpan ikut nombor ayat. Kalau kau tambah atau buang baris di tengah, rakaman mungkin beralih ke ayat lain.</p>
+    <div class="two"><button id="bEdCancel" type="button">Batal</button><button id="bEdSave" type="button" class="primary">Simpan & guna</button></div>
+  </div>
+  <p class="pstatus" id="skStatus"></p>
+  <button id="cSkrip" type="button">Tutup</button>
+</section>
+
+<!-- Line voices -->
+<section class="panel" id="pAyat" hidden aria-label="Suara ayat">
+  <h2>SUARA AYAT</h2>
+  <p>Suara untuk setiap ayat skrip aktif. ▶ dengar (ikut tune), ⬇ simpan, ● rakam semula, 📁 pilih fail dari phone.</p>
+  <div class="two">
+    <button id="bListenAll" type="button" class="ghost">Dengar semua</button>
+    <button id="bTTS" type="button" class="ghost">Suara phone</button>
+  </div>
+  <button id="bSaveAll" type="button" class="primary">Simpan semua ayat (1 fail, ikut tune)</button>
+  <button id="bSplit" type="button" class="ghost">📥 Import rakaman penuh → pecah ikut ayat</button>
+  <p class="pstatus" id="ayStatus"></p>
+  <div class="list" id="voList"></div>
+  <button id="cAyat" type="button">Tutup</button>
+</section>
+
+<!-- Recordings library -->
+<section class="panel" id="pRakaman" hidden aria-label="Perpustakaan rakaman">
+  <h2>PERPUSTAKAAN RAKAMAN</h2>
+  <p>Simpan rakaman suara penuh. Pilih tune, dengar, kemudian ⬇ download untuk hantar dalam chat.</p>
+  <div class="two">
+    <button id="bUpload" type="button" class="primary">+ Upload rakaman</button>
+    <button id="bRecFree" type="button" class="recbtn" aria-pressed="false">● Rakam baru</button>
+  </div>
+  <button id="tunePill2" type="button" class="pill tune" style="align-self:flex-start">Tune: Asli · tukar</button>
+  <p class="pstatus" id="rkStatus"></p>
+  <div class="list" id="rkList"></div>
+  <button id="cRakaman" type="button">Tutup</button>
+</section>
+
+<!-- Tune -->
+<section class="panel" id="pTune" hidden aria-label="Tune suara">
+  <h2>TUNE SUARA</h2>
+  <p>Pilih gaya atau laras slider. Rakaman asal tak berubah. Tune dipakai masa dengar dan masa download.</p>
+  <h3>Manusia</h3><div class="presets" id="presetA"></div>
+  <h3>Kesan</h3><div class="presets" id="presetB"></div>
+  <h3>Lawak & haiwan</h3><div class="presets" id="presetC"></div>
+  <div class="row"><label for="kRate">Nada <output id="oRate"></output></label><input id="kRate" type="range" min="0.6" max="1.6" step="0.01"><p>Rendah = garau dan perlahan. Tinggi = nyaring dan laju.</p></div>
+  <div class="row"><label for="kBass">Bass <output id="oBass"></output></label><input id="kBass" type="range" min="-12" max="12" step="1"></div>
+  <div class="row"><label for="kTreble">Treble <output id="oTreble"></output></label><input id="kTreble" type="range" min="-12" max="12" step="1"></div>
+  <div class="row"><label for="kVerb">Gema bilik <output id="oVerb"></output></label><input id="kVerb" type="range" min="0" max="1" step="0.05"></div>
+  <div class="row"><label for="kEcho">Echo <output id="oEcho"></output></label><input id="kEcho" type="range" min="0" max="0.7" step="0.05"></div>
+  <div class="row"><label for="kRobot">Robot <output id="oRobot"></output></label><input id="kRobot" type="range" min="0" max="1" step="0.05"></div>
+  <div class="row"><label for="kVib">Getar <output id="oVib"></output></label><input id="kVib" type="range" min="0" max="1" step="0.05"><p>Suara bergetar, macam kambing mengembek.</p></div>
+  <p class="pstatus" id="tnStatus"></p>
+  <div class="two">
+    <button id="bTuneTest" type="button" class="ghost">▶ Cuba</button>
+    <button id="cTune" type="button">Tutup</button>
+  </div>
+</section>
+
+<!-- Mic blocked helper -->
+<section class="panel" id="pMic" hidden aria-label="Rakam guna app perakam">
+  <h2>RAKAM GUNA APP PERAKAM</h2>
+  <p>Mikrofon disekat dalam paparan ini, jadi page tak boleh rakam sendiri. Guna cara ni. Teleprompter kekal di skrin, dan app perakam rakam di belakang.</p>
+  <ol class="intro" style="padding-left:1.2em;margin:0">
+    <li>Buka app <b>Perakam Suara</b> phone dan tekan <b>rakam</b>.</li>
+    <li>Kembali ke teleprompter guna butang <b>Recent</b> atau <b>Home</b>. Jangan tekan berhenti; rakaman terus berjalan di belakang.</li>
+    <li>Tekan <b>Mula baca</b> di bawah. Baca ayat demi ayat, tekan Seterusnya, dan diam masa jeda merah.</li>
+    <li>Habis semua ayat, buka semula app perakam dan <b>berhenti</b>.</li>
+    <li>Kembali ke sini, tekan <b>Import rakaman penuh</b>, dan pilih fail tu. Page akan pecahkan ikut ayat.</li>
+  </ol>
+  <button id="bMicRead" type="button" class="primary">Mula baca</button>
+  <button id="bMicImport" type="button" class="ghost">📥 Import rakaman penuh</button>
+  <p>Mahu rakam terus dalam page? Buka fail <b>Teleprompter-Putra.html</b> dalam Chrome. Jika Chrome masih sekat mikrofon, letak fail itu di Netlify supaya dapat pautan https.</p>
+  <button id="cMic" type="button">Tutup</button>
+</section>
+
+<!-- Settings -->
+<section class="panel" id="pSet" hidden aria-label="Tetapan">
+  <h2>TETAPAN</h2>
+  <div class="row"><label for="sFs">Saiz tulisan <output id="oFs"></output></label><input id="sFs" type="range" min="28" max="96" step="2"></div>
+  <div class="row"><label for="sGap">Jeda antara ayat <output id="oGap"></output></label><input id="sGap" type="range" min="1" max="5" step="0.5"></div>
+  <div class="row">
+    <span class="switch"><input id="sAuto" type="checkbox"><label for="sAuto">Auto jalan sendiri</label></span>
+    <label for="sWpm">Laju bacaan <output id="oWpm"></output></label><input id="sWpm" type="range" min="80" max="200" step="10">
+    <p>Ayat bertukar sendiri ikut laju bacaan. Semasa merakam, rakaman ayat itu disimpan dulu sebelum bertukar.</p>
+  </div>
+  <p>Semua skrip dan rakaman disimpan dalam browser phone ini sahaja. Padam data browser = semua hilang. Download rakaman penting ke phone.</p>
+  <button id="cSet" type="button">Tutup</button>
+</section>
+
+<input id="filePick" type="file" accept="audio/*" class="sr" tabindex="-1">
+<input id="fileRec" type="file" accept="audio/*" capture class="sr" tabindex="-1">
+<input id="fileLib" type="file" accept="audio/*,video/*" multiple class="sr" tabindex="-1">
+<input id="fileSplit" type="file" accept="audio/*,video/*" class="sr" tabindex="-1">
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const BE_NAME="Bedah Enjin";
+const BE_LINES=[
+ "Aku bukan mekanik*, tapi aku nak tahu macam mana enjin motor aku berfungsi. Sedutan, mampatan, kuasa, ekzos. Jom kita bedah sama-sama!",
+ "Penutup kepala silinder*, pelindung mekanisme injap.",
+ "Aci sesondol*, menolak injap terbuka tepat pada masanya.",
+ "Palam pencucuh*, percikan api untuk letupan.",
+ "Injap masuk dan injap ekzos*, pintu keluar masuk gas.",
+ "Kepala silinder*, rumah kepada kebuk pembakaran.",
+ "Rantai masa*, penyambung aci engkol dengan aci sesondol.",
+ "Blok silinder*, laluan omboh naik dan turun.",
+ "Gelang omboh*, penghalang kebocoran mampatan.",
+ "Omboh*, penerima tekanan letupan.",
+ "Rod penyambung*, penghubung omboh ke aci engkol.",
+ "Aci engkol*, penukar gerakan salingan kepada putaran.",
+ "Sekarang*, kita cantum semula.",
+ "Dan enjin hidup kembali!* Komen kat bawah, nak bedah apa lepas ni?",
+];
+const BE_TONES=["Semangat",...Array(11).fill("Tenang, jelas"),"Biasa","Semangat"];
+const hashKey=(n,l)=>{let h=0;const s=n+"|"+l.join("\n");for(let k=0;k<s.length;k++)h=(h*31+s.charCodeAt(k))|0;return "s"+(h>>>0).toString(36);};
+const BE_ID=hashKey(BE_NAME,BE_LINES); // same key earlier versions used, so old recordings stay attached
+
+// ---------- tune presets ----------
+const BASE={rate:1,hp:70,lp:16000,bass:0,mid:0,treble:0,drive:0,ring:0,ringHz:50,verb:0,verbLen:1.2,echo:0,echoT:0.28,vib:0,vibHz:6,trem:0,tremHz:6,gain:1,comp:true};
+const PRESETS=[
+ {g:"A",id:"asli",name:"Asli",d:"Tanpa kesan",p:{comp:false}},
+ {g:"A",id:"jelas",name:"Jelas",d:"Sebutan terang",p:{hp:90,bass:1,mid:2,treble:5,gain:1.2}},
+ {g:"A",id:"radio",name:"Radio",d:"DJ FM",p:{hp:80,bass:5,mid:3,treble:3,gain:1.3}},
+ {g:"A",id:"garau",name:"Garau",d:"Dalam & tebal",p:{rate:0.92,bass:6,treble:-1,gain:1.2}},
+ {g:"A",id:"nyaring",name:"Nyaring",d:"Muda & laju",p:{rate:1.08,bass:-2,treble:4}},
+ {g:"B",id:"telefon",name:"Telefon",d:"Panggilan",p:{hp:400,lp:3400,mid:6,drive:0.25,gain:1.4}},
+ {g:"B",id:"walkie",name:"Walkie",d:"Walkie-talkie",p:{hp:600,lp:2800,mid:8,drive:0.6,gain:1.3}},
+ {g:"B",id:"lif",name:"Dalam Lif",d:"Sangkar besi",p:{hp:120,mid:3,verb:0.45,verbLen:0.6,gain:1.1}},
+ {g:"B",id:"umum",name:"Pengumuman",d:"PA mall",p:{hp:300,lp:5000,mid:6,drive:0.15,verb:0.35,verbLen:1.6,gain:1.3}},
+ {g:"B",id:"stadium",name:"Stadium",d:"Gema besar",p:{bass:3,verb:0.55,verbLen:3,echo:0.25,echoT:0.35,gain:1.1}},
+ {g:"B",id:"bawahair",name:"Bawah Air",d:"Tenggelam",p:{lp:700,vib:0.0035,vibHz:2.5,verb:0.25,verbLen:1,gain:1.4}},
+ {g:"B",id:"hantu",name:"Hantu",d:"Seram",p:{rate:0.88,treble:-3,verb:0.6,verbLen:3.5,echo:0.35,echoT:0.4,trem:0.3,tremHz:4}},
+ {g:"C",id:"robot",name:"Robot",d:"Mesin",p:{ring:0.85,ringHz:55,mid:3,drive:0.2,gain:1.2}},
+ {g:"C",id:"alien",name:"Alien",d:"Angkasa",p:{rate:1.05,ring:0.6,ringHz:180,treble:4,echo:0.3,echoT:0.18}},
+ {g:"C",id:"raksasa",name:"Raksasa",d:"Berat",p:{rate:0.78,bass:9,drive:0.3,verb:0.3,verbLen:1.5,gain:1.2}},
+ {g:"C",id:"chipmunk",name:"Chipmunk",d:"Comel",p:{rate:1.35,bass:-4,treble:3}},
+ {g:"C",id:"kambing",name:"Kambing",d:"Mbeeek",p:{rate:1.18,hp:200,treble:3,vib:0.0045,vibHz:7,trem:0.6,tremHz:7}},
+ {g:"C",id:"unta",name:"Unta",d:"Berdeguk",p:{rate:0.82,bass:5,drive:0.35,vib:0.002,vibHz:3,trem:0.4,tremHz:12,gain:1.2}},
+];
+
+// ---------- storage ----------
+const LS={get(k,d){try{const v=localStorage.getItem("tp:"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},
+          set(k,v){try{localStorage.setItem("tp:"+k,JSON.stringify(v));}catch(e){}}};
+let idb=null;
+function openDB(){return new Promise(res=>{try{const r=indexedDB.open("teleprompter",2);
+  r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains("clips"))db.createObjectStore("clips");if(!db.objectStoreNames.contains("voices"))db.createObjectStore("voices",{keyPath:"id"});};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);r.onblocked=()=>res(null);}catch(e){res(null);}});}
+function dbOp(store,mode,fn){return new Promise(res=>{if(!idb)return res(null);try{const tx=idb.transaction(store,mode);const r=fn(tx.objectStore(store));tx.oncomplete=()=>res(r&&r.result);tx.onerror=()=>res(null);}catch(e){res(null);}});}
+
+// ---------- script library (localStorage) ----------
+let scripts=LS.get("scripts",null);
+if(!scripts){ // first run of the library: keep what earlier versions stored
+  scripts=[{id:BE_ID,name:BE_NAME,lines:BE_LINES,t:Date.now()}];
+  const oldN=LS.get("name",null), oldL=LS.get("lines",null);
+  if(oldN&&oldL&&hashKey(oldN,oldL)!==BE_ID) scripts.push({id:hashKey(oldN,oldL),name:oldN,lines:oldL,t:Date.now()});
+  LS.set("scripts",scripts); LS.set("active",oldN&&oldL?hashKey(oldN,oldL):BE_ID);
+}
+if(!scripts.find(s=>s.id===BE_ID)) scripts.unshift({id:BE_ID,name:BE_NAME,lines:BE_LINES,t:Date.now()});
+let activeId=LS.get("active",BE_ID); if(!scripts.find(s=>s.id===activeId)) activeId=scripts[0].id;
+const cur=()=>scripts.find(s=>s.id===activeId);
+let name=cur().name, lines=cur().lines;
+const NO_BUILTIN=!!window.__NO_BUILTIN;
+const isDefault=()=>!NO_BUILTIN&&activeId===BE_ID&&JSON.stringify(lines)===JSON.stringify(BE_LINES);
+function saveScripts(){LS.set("scripts",scripts);LS.set("active",activeId);}
+
+// ---------- state ----------
+let fs=LS.get("fs",48), gapS=LS.get("gap",2), auto=LS.get("auto",false), wpm=LS.get("wpm",130);
+let presetId=LS.get("preset","asli"), tune=Object.assign({},BASE,LS.get("tune",{}));
+let i=-1, busy=false, timer=null, mode=null;
+const userClip={};
+let downloads=null; const inViewer=!!(window.claude&&window.claude.use);
+
+const strip=t=>t.replace(/\*/g,"");
+const fmt=t=>{const e=t.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));const k=e.indexOf("*");return k<0?e:`<b>${e.slice(0,k)}</b>${e.slice(k+1).replace(/\*/g,"")}`;};
+const builtinUrl=n=>(window.__CLIPS&&window.__CLIPS[n])||`clips/ayat${String(n+1).padStart(2,"0")}.mp4`;
+const ORIG_URL=()=>window.__ORIG||"clips/rakaman-asal.mp4";
+const hasVoice=n=>!!userClip[n]||(isDefault()&&n<BE_LINES.length);
+function say(m,el){$(el||"status").textContent=m||"";}
+function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"suara";}
+const fmtDur=s=>`${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+function confirmBtn(b,label,fn){b.onclick=()=>{if(b.dataset.arm){fn();return;}b.dataset.arm="1";const old=b.textContent;b.textContent=label;setTimeout(()=>{delete b.dataset.arm;b.textContent=old;},3000);};}
+
+// ---------- audio engine ----------
+let ctx=null; const bufCache=new Map();
+function getCtx(){if(!ctx){const AC=window.AudioContext||window.webkitAudioContext;ctx=new AC();}if(ctx.state==="suspended")ctx.resume();return ctx;}
+async function decodeBlob(b){
+  if(!b) return null; if(bufCache.has(b)) return bufCache.get(b);
+  try{const buf=await getCtx().decodeAudioData(await b.arrayBuffer());bufCache.set(b,buf);return buf;}catch(e){return null;}
+}
+async function fetchBlob(url){try{const r=await fetch(url);if(r.ok)return await r.blob();}catch(e){}return null;}
+const urlBlobs={};
+async function clipBlob(n){
+  if(userClip[n]) return userClip[n];
+  if(isDefault()){const u=builtinUrl(n);if(!urlBlobs[u])urlBlobs[u]=await fetchBlob(u);return urlBlobs[u];}
+  return null;
+}
+async function clipBuffer(n){return decodeBlob(await clipBlob(n));}
+function makeImpulse(c,sec){const len=Math.max(1,Math.floor(c.sampleRate*sec));const ir=c.createBuffer(2,len,c.sampleRate);
+  for(let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let k=0;k<len;k++)d[k]=(Math.random()*2-1)*Math.pow(1-k/len,3);}return ir;}
+function driveCurve(amt){const n=1024,c=new Float32Array(n),k=amt*60;for(let x=0;x<n;x++){const v=x*2/n-1;c[x]=(1+k)*v/(1+k*Math.abs(v));}return c;}
+function lfo(c,hz,depth,target,startAt){const o=c.createOscillator();o.frequency.value=hz;const g=c.createGain();g.gain.value=depth;o.connect(g);g.connect(target);o.start(startAt||0);}
+// Effect chain for one source into `dest`.
+function chain(c,src,p,dest,startAt){
+  src.playbackRate.value=p.rate;
+  const hp=c.createBiquadFilter();hp.type="highpass";hp.frequency.value=p.hp;
+  const lp=c.createBiquadFilter();lp.type="lowpass";lp.frequency.value=Math.min(p.lp,c.sampleRate/2-100);
+  const bs=c.createBiquadFilter();bs.type="lowshelf";bs.frequency.value=200;bs.gain.value=p.bass;
+  const md=c.createBiquadFilter();md.type="peaking";md.frequency.value=1800;md.Q.value=0.8;md.gain.value=p.mid;
+  const tr=c.createBiquadFilter();tr.type="highshelf";tr.frequency.value=3500;tr.gain.value=p.treble;
+  src.connect(hp);hp.connect(lp);lp.connect(bs);bs.connect(md);md.connect(tr);
+  let node=tr;
+  if(p.vib>0){const d=c.createDelay(0.1);d.delayTime.value=0.012;lfo(c,p.vibHz,p.vib,d.delayTime,startAt);node.connect(d);node=d;}
+  if(p.drive>0){const ws=c.createWaveShaper();ws.curve=driveCurve(p.drive);ws.oversample="2x";node.connect(ws);node=ws;}
+  if(p.ring>0){const dry=c.createGain();dry.gain.value=1-p.ring;const mod=c.createGain();mod.gain.value=0;lfo(c,p.ringHz,p.ring,mod.gain,startAt);
+    const sum=c.createGain();node.connect(dry);node.connect(mod);dry.connect(sum);mod.connect(sum);node=sum;}
+  if(p.comp){const cp=c.createDynamicsCompressor();cp.threshold.value=-22;cp.ratio.value=3.5;cp.attack.value=0.005;cp.release.value=0.15;node.connect(cp);node=cp;}
+  if(p.trem>0){const tg=c.createGain();tg.gain.value=1-p.trem/2;lfo(c,p.tremHz,p.trem/2,tg.gain,startAt);node.connect(tg);node=tg;}
+  const out=c.createGain();out.gain.value=p.gain;node.connect(out);out.connect(dest);
+  if(p.verb>0){const cv=c.createConvolver();cv.buffer=makeImpulse(c,p.verbLen);const wet=c.createGain();wet.gain.value=p.verb;node.connect(cv);cv.connect(wet);wet.connect(dest);}
+  if(p.echo>0){const dl=c.createDelay(2);dl.delayTime.value=p.echoT;const fb=c.createGain();fb.gain.value=p.echo;const wet=c.createGain();wet.gain.value=0.6;
+    node.connect(dl);dl.connect(fb);fb.connect(dl);dl.connect(wet);wet.connect(dest);}
+}
+let liveSrc=null, liveOwner=null;
+function stopAudio(){try{liveSrc&&liveSrc.stop();}catch(e){} liveSrc=null; const o=liveOwner; liveOwner=null; o&&o();}
+function playBuffer(buf,done,owner){
+  stopAudio(); if(!buf){done&&done(false);return;}
+  const c=getCtx(), s=c.createBufferSource(); s.buffer=buf; chain(c,s,tune,c.destination,0);
+  s.onended=()=>{if(liveSrc===s){liveSrc=null;const o=liveOwner;liveOwner=null;o&&o();done&&done(true);}};
+  liveSrc=s; liveOwner=owner||null; s.start();
+}
+async function playLine(n,done){playBuffer(await clipBuffer(n),done);}
+async function renderBuffers(bufs,gapSec){
+  bufs=bufs.filter(Boolean); if(!bufs.length) return null;
+  const sr=44100, tail=(tune.verb>0||tune.echo>0)?Math.max(tune.verbLen,1.5):0.3;
+  let total=0.05;for(const b of bufs)total+=b.duration/tune.rate+gapSec; total+=tail;
+  const OC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+  const oc=new OC(1,Math.ceil(total*sr),sr); let t=0.05;
+  for(const b of bufs){const s=oc.createBufferSource();s.buffer=b;chain(oc,s,tune,oc.destination,t);s.start(t);t+=b.duration/tune.rate+gapSec;}
+  return await oc.startRendering();
+}
+function encodeWav(buf){
+  const ch=buf.getChannelData(0),n=ch.length,ab=new ArrayBuffer(44+n*2),v=new DataView(ab);
+  const w=(o,s)=>{for(let k=0;k<s.length;k++)v.setUint8(o+k,s.charCodeAt(k));};
+  w(0,"RIFF");v.setUint32(4,36+n*2,true);w(8,"WAVE");w(12,"fmt ");v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,buf.sampleRate,true);v.setUint32(28,buf.sampleRate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,"data");v.setUint32(40,n*2,true);
+  let peak=0;for(let k=0;k<n;k++)peak=Math.max(peak,Math.abs(ch[k]));const g=peak>0.98?0.98/peak:1;
+  for(let k=0;k<n;k++){const s=Math.max(-1,Math.min(1,ch[k]*g));v.setInt16(44+k*2,s<0?s*0x8000:s*0x7fff,true);}
+  return new Blob([ab],{type:"audio/wav"});
+}
+const pickMime=()=>window.MediaRecorder?(["audio/webm;codecs=opus","audio/webm","audio/mp4"].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||""):"";
+// In claude.ai the save list allows webm/mp4 but not wav: encode by playing the render into a recorder (real time).
+function encodeWebm(buf,onTick){
+  return new Promise((res,rej)=>{
+    if(!window.MediaRecorder){rej(new Error("no-recorder"));return;}
+    const c=getCtx(), dest=c.createMediaStreamDestination(), s=c.createBufferSource(); s.buffer=buf; s.connect(dest);
+    const mime=pickMime(); const rec=new MediaRecorder(dest.stream,mime?{mimeType:mime}:undefined), parts=[];
+    rec.ondataavailable=e=>e.data.size&&parts.push(e.data);
+    rec.onstop=()=>res(new Blob(parts,{type:rec.mimeType||"audio/webm"}));
+    const t0=c.currentTime, iv=setInterval(()=>onTick&&onTick(Math.min(1,(c.currentTime-t0)/buf.duration)),250);
+    s.onended=()=>{clearInterval(iv);setTimeout(()=>rec.stop(),150);};
+    rec.start(); s.start();
+  });
+}
+async function saveAudio(baseName,buf,el){
+  if(!buf){say("Suara tak dapat dibaca.",el);return;}
+  if(inViewer){
+    if(!downloads){say("Download tak tersedia dalam paparan ini. Guna fail HTML dalam Chrome.",el);return;}
+    try{
+      const blob=await encodeWebm(buf,p=>say(`Menyediakan fail… ${Math.round(p*100)}% (ikut panjang suara)`,el));
+      const ext=/mp4/.test(blob.type)?"mp4":"webm";
+      await downloads.save({filename:`${baseName}.${ext}`,data:blob}); say(`Disimpan: ${baseName}.${ext}`,el);
+    }catch(err){const c=err&&err.code;say(c==="declined"?"Download dibatalkan.":c==="rate_limited"?"Tunggu sekejap, kemudian cuba lagi.":"Download tak berjaya dalam paparan ini.",el);}
+    return;
+  }
+  const url=URL.createObjectURL(encodeWav(buf)); const a=document.createElement("a"); a.href=url; a.download=`${baseName}.wav`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),8000); say(`Disimpan: ${baseName}.wav (folder Download)`,el);
+}
+
+// ---------- microphone ----------
+let micOK=null, stream=null;
+async function ensureMic(){
+  if(micOK===false) return false; if(stream) return true;
+  try{if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder)throw 0;
+    stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true,autoGainControl:true}});micOK=true;return true;}
+  catch(e){micOK=false;return false;}
+}
+function newRecorder(){const m=pickMime();return new MediaRecorder(stream,m?{mimeType:m}:undefined);}
+let recTick=null,recStart=0;
+function recIndicator(on){
+  clearInterval(recTick); $("recInd").hidden=!on; document.body.classList.toggle("recording",on&&recSession);
+  if(on){recStart=Date.now();const upd=()=>{const s=Math.floor((Date.now()-recStart)/1000);$("recInd").textContent=`● REC ${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;};upd();recTick=setInterval(upd,250);}
+}
+
+// ---------- line recording ----------
+let recorder=null, recParts=[], recSession=false, recLine=-1;
+function startRec(){
+  if(!stream||i<0||i>=lines.length) return;
+  recorder=newRecorder(); recParts=[]; recLine=i;
+  recorder.ondataavailable=e=>e.data.size&&recParts.push(e.data);
+  recorder.start(); recIndicator(true);
+}
+function abortRec(){if(recorder&&recorder.state!=="inactive"){recorder.onstop=null;recorder.stop();}recorder=null;recIndicator(false);}
+function stopRec(){
+  return new Promise(res=>{
+    if(!recorder||recorder.state==="inactive"){res(null);return;}
+    const line=recLine, r=recorder, secs=(Date.now()-recStart)/1000;
+    r.onstop=async()=>{
+      recIndicator(false); recorder=null;
+      const blob=new Blob(recParts,{type:r.mimeType||"audio/webm"});
+      if(blob.size>0&&line>=0){userClip[line]=blob;await dbOp("clips","readwrite",st=>st.put(blob,activeId+":"+line));say(`Ayat ${line+1} dirakam (${secs.toFixed(1)} s).`);}
+      res(blob); show();
+    };
+    r.stop();
+  });
+}
+function setRecBtn(){const b=$("bRec");b.setAttribute("aria-pressed",String(recSession));b.textContent=recSession?"■ Henti rakam":"● Rakam";}
+let fileFor=-1;
+$("bRec").onclick=async e=>{
+  e.stopPropagation();
+  if(freeRec) await stopFreeRec();
+  if(mode==="listen"||mode==="tts") stopPlay();
+  if(recSession){recSession=false;setRecBtn();clearTimeout(autoT);await stopRec();return;}
+  if(i<0||i>=lines.length){i=Math.min(LS.get("pos:"+activeId,0),lines.length-1);if(i<0)i=0;mode="read";wake();show();}
+  if(!(await ensureMic())){openPanel("pMic");return;}
+  recSession=true; setRecBtn(); startRec(); scheduleAuto();
+};
+
+// ---------- reading flow ----------
+function applySettings(){
+  document.documentElement.style.setProperty("--fs",fs+"px");
+  $("sFs").value=fs;$("oFs").textContent=fs+"px";$("sGap").value=gapS;$("oGap").textContent=gapS+" saat";
+  $("sAuto").checked=auto;$("sWpm").value=wpm;$("oWpm").textContent=wpm+" perkataan/minit";
+}
+function fitText(){const st=$("stage"),t=$("text");let sz=fs;t.style.fontSize=sz+"px";while(st.scrollHeight>st.clientHeight+2&&sz>24){sz-=2;t.style.fontSize=sz+"px";}}
+window.addEventListener("resize",()=>{if(i>=0&&i<lines.length)fitText();});
+function show(){
+  const N=lines.length;
+  $("intro").hidden=i>=0; $("read").hidden=i<0;
+  $("bBack").disabled=i<=0||busy; $("bRedo").disabled=i<0||i>=N||busy;
+  $("bPlay1").disabled=!(i>=0&&i<N&&hasVoice(i));
+  if(i<0){$("count").textContent=`${name} · ${N} ayat`;$("prog").style.width="0";$("bGo").textContent="Mula";return;}
+  if(i>=N){
+    $("tone").textContent="Siap";$("voTag").hidden=true;
+    $("text").innerHTML="<b>Siap!</b> Semak dalam tab Suara ayat, kemudian download dan hantar dalam chat.";
+    $("text").style.fontSize="";$("next").textContent="";$("count").textContent=`${name} · ${N} / ${N}`;$("prog").style.width="100%";
+    $("bGo").textContent="Dari awal";return;
+  }
+  $("voTag").hidden=false;
+  $("count").textContent=`${name} · Ayat ${i+1} / ${N}`;
+  $("prog").style.width=`${(i/N)*100}%`;
+  $("tone").textContent=isDefault()?BE_TONES[i]:"";
+  $("text").innerHTML=fmt(lines[i]);
+  const hv=hasVoice(i);$("voTag").textContent=hv?"Suara ✓":"Tiada suara";$("voTag").classList.toggle("has",hv);
+  $("next").textContent=i+1<N?`Lepas ni: ${strip(lines[i+1])}`:"Ayat terakhir";
+  fitText();
+  $("bGo").textContent=i+1<N?"Seterusnya":"Habis";
+  LS.set("pos:"+activeId,i);
+}
+function gap(sec,then,label){
+  clearInterval(timer); busy=true; show(); $("bGo").disabled=true;
+  const p=$("pause"); p.hidden=false; const steps=Math.ceil(sec); let n=steps; $("text").style.opacity=.25;
+  const tick=()=>{if(n<=0){clearInterval(timer);p.hidden=true;$("text").style.opacity=1;busy=false;$("bGo").disabled=false;then();return;}
+    p.textContent=`${label||"DIAM…"} ${n}`;n--;};
+  tick(); timer=setInterval(tick,sec/steps*1000);
+}
+function readTime(n){const w=strip(lines[n]).trim().split(/\s+/).length;return Math.max(1.5,w/(wpm/60));}
+let autoT=null;
+function scheduleAuto(){clearTimeout(autoT);if(!auto||mode!=="read"||i<0||i>=lines.length)return;autoT=setTimeout(()=>go(),readTime(i)*1000+(recSession?400:0));}
+function wake(){try{navigator.wakeLock&&navigator.wakeLock.request("screen").catch(()=>{});}catch(e){}}
+async function go(){
+  if(busy) return;
+  const N=lines.length;
+  if(i>=N){i=-1;mode=null;show();return;}
+  if(i<0){i=LS.get("pos:"+activeId,0);if(i>=N)i=0;mode="read";show();wake();
+    if(i>0)say(`Sambung dari ayat ${i+1}. Tekan Undur untuk ke ayat awal.`);scheduleAuto();return;}
+  clearTimeout(autoT);
+  if(recSession) await stopRec();
+  gap(gapS,()=>{i++;show();
+    if(i>=N){mode=null;LS.set("pos:"+activeId,0);if(recSession){recSession=false;setRecBtn();say("Semua ayat dirakam. Semak dalam tab Suara ayat.");}return;}
+    if(recSession) startRec(); scheduleAuto();});
+}
+$("bGo").onclick=e=>{e.stopPropagation();if(mode==="listen"||mode==="tts")return;go();};
+$("stage").onclick=()=>{if(mode==="read"&&i>=0&&i<lines.length)go();};
+$("bBack").onclick=e=>{e.stopPropagation();if(i>0&&!busy){clearTimeout(autoT);if(recSession)abortRec();i--;show();if(recSession)startRec();scheduleAuto();}};
+$("bRedo").onclick=e=>{e.stopPropagation();if(i>=0&&i<lines.length&&!busy){clearTimeout(autoT);if(recSession)abortRec();
+  gap(2,()=>{show();if(recSession)startRec();scheduleAuto();},recSession?"RAKAM SEMULA…":'SEBUT "ULANG", TUNGGU…');}};
+document.addEventListener("keydown",e=>{if(e.target.closest("textarea,input"))return;if(e.code==="Space"||e.code==="ArrowRight"){e.preventDefault();if(mode!=="listen"&&mode!=="tts")go();}});
+$("bPlay1").onclick=e=>{e.stopPropagation();if(i>=0&&i<lines.length){stopPlay();playLine(i,()=>{});}};
+
+// ---------- listen all / phone voice ----------
+function stopPlay(){if(mode==="listen"||mode==="tts")mode=null;clearTimeout(timer);clearInterval(timer);stopAudio();try{speechSynthesis.cancel();}catch(e){}
+  $("bListenAll").setAttribute("aria-pressed","false");$("bListenAll").textContent="Dengar semua";
+  $("bTTS").setAttribute("aria-pressed","false");$("bTTS").textContent="Suara phone";
+  $("pause").hidden=true;$("text").style.opacity=1;busy=false;show();}
+function listenStep(){if(mode!=="listen")return;if(i>=lines.length){stopPlay();return;}show();
+  playLine(i,ok=>{if(mode!=="listen")return;timer=setTimeout(()=>{i++;listenStep();},ok?gapS*1000:readTime(i)*1000);});}
+$("bListenAll").onclick=()=>{
+  if(mode==="listen"){stopPlay();return;}
+  if(!lines.some((_,n)=>hasVoice(n))){say("Belum ada suara untuk skrip ini.","ayStatus");return;}
+  stopPlay();mode="listen";$("bListenAll").setAttribute("aria-pressed","true");$("bListenAll").textContent="Berhenti";i=0;openPanel(null);listenStep();
+};
+function pickVoice(){const vs=(window.speechSynthesis&&speechSynthesis.getVoices())||[];return vs.find(v=>/^ms/i.test(v.lang))||vs.find(v=>/^id/i.test(v.lang))||null;}
+function ttsStep(){if(mode!=="tts")return;if(i>=lines.length){stopPlay();return;}show();
+  const u=new SpeechSynthesisUtterance(strip(lines[i]));const v=pickVoice();if(v){u.voice=v;u.lang=v.lang;}else u.lang="ms-MY";
+  u.onend=()=>{if(mode!=="tts")return;timer=setTimeout(()=>{i++;ttsStep();},gapS*1000);};
+  u.onerror=()=>{if(mode==="tts"){stopPlay();say("Suara phone tak dapat dimainkan di sini.");}};speechSynthesis.speak(u);}
+$("bTTS").onclick=()=>{
+  if(!window.speechSynthesis){say("Phone ini tiada suara text-to-speech untuk page.","ayStatus");return;}
+  if(mode==="tts"){stopPlay();return;}
+  stopPlay();mode="tts";$("bTTS").setAttribute("aria-pressed","true");$("bTTS").textContent="Berhenti";
+  const v=pickVoice();say(v?`Suara phone: ${v.name} (${v.lang})`:"Suara Bahasa Melayu tak dijumpai, guna suara lalai phone.");i=0;openPanel(null);ttsStep();
+};
+
+// ---------- panels ----------
+const PANELS=["pSkrip","pAyat","pRakaman","pTune","pSet","pMic"];
+function openPanel(id){if(id!=="pTune")stopAudio();PANELS.forEach(p=>$(p).hidden=p!==id);
+  if(id==="pSkrip")renderScripts();if(id==="pAyat")renderVoiceList();if(id==="pRakaman")renderLib();if(id==="pTune")renderTune();}
+$("tSkrip").onclick=()=>openPanel("pSkrip");
+$("tAyat").onclick=()=>openPanel("pAyat");
+$("tRakaman").onclick=()=>openPanel("pRakaman");
+$("tTune").onclick=()=>openPanel("pTune");
+$("tunePill").onclick=()=>openPanel("pTune");
+$("tSet").onclick=()=>openPanel("pSet");
+let tuneReturn=null;
+$("tunePill2").onclick=()=>{tuneReturn="pRakaman";openPanel("pTune");};
+["cSkrip","cAyat","cRakaman","cSet","cMic"].forEach(id=>$(id).onclick=()=>openPanel(null));
+$("cTune").onclick=()=>{const r=tuneReturn;tuneReturn=null;openPanel(r);};
+$("sFs").oninput=e=>{fs=+e.target.value;LS.set("fs",fs);applySettings();};
+$("sGap").oninput=e=>{gapS=+e.target.value;LS.set("gap",gapS);applySettings();};
+$("sAuto").onchange=e=>{auto=e.target.checked;LS.set("auto",auto);applySettings();scheduleAuto();};
+$("sWpm").oninput=e=>{wpm=+e.target.value;LS.set("wpm",wpm);applySettings();};
+
+// ---------- script library UI ----------
+let editingId=null;
+async function countRecorded(id,n){let c=0;for(let k=0;k<n;k++){const b=await dbOp("clips","readonly",st=>st.get(id+":"+k));if(b)c++;}return c;}
+async function renderScripts(){
+  const box=$("scriptList");box.textContent="";
+  const sorted=[...scripts].sort((a,b)=>(b.id===activeId)-(a.id===activeId)||b.t-a.t);
+  for(const s of sorted){
+    const it=document.createElement("div");it.className="item"+(s.id===activeId?" active":"");
+    const num=document.createElement("span");num.className="n";num.textContent=s.id===activeId?"AKTIF":"";
+    const t=document.createElement("span");t.className="t";t.textContent=s.name;
+    const sm=document.createElement("small");sm.textContent=`${s.lines.length} ayat`;t.append(sm);
+    countRecorded(s.id,s.lines.length).then(c=>{const base=s.id===BE_ID?" · suara asal ada":"";sm.textContent=`${s.lines.length} ayat · ${c} dirakam${base}`;});
+    const acts=document.createElement("div");acts.className="acts";
+    const mk=(txt,fn,cls)=>{const b=document.createElement("button");b.type="button";b.textContent=txt;if(cls)b.className=cls;if(fn)b.onclick=fn;return b;};
+    if(s.id!==activeId) acts.append(mk("Guna",()=>useScript(s.id),"primary"));
+    acts.append(mk("Edit",()=>openEditor(s.id)));
+    acts.append(mk("Salin",()=>{const c={id:"s"+Date.now().toString(36),name:s.name+" (salinan)",lines:[...s.lines],t:Date.now()};scripts.push(c);saveScripts();renderScripts();say(`Disalin: ${c.name}`,"skStatus");}));
+    if(s.id!==BE_ID){const del=mk("Padam",null,"danger");confirmBtn(del,"Pasti padam?",()=>deleteScript(s.id));acts.append(del);}
+    it.append(num,t,acts);box.append(it);
+  }
+}
+async function useScript(id){
+  if(recSession){recSession=false;setRecBtn();await stopRec();}
+  stopPlay();activeId=id;name=cur().name;lines=cur().lines;cur().t=Date.now();saveScripts();
+  i=-1;await loadUserClips();show();openPanel(null);say(`Skrip "${name}" aktif.`);
+}
+async function deleteScript(id){
+  const s=scripts.find(x=>x.id===id);if(!s)return;
+  for(let k=0;k<s.lines.length+50;k++)await dbOp("clips","readwrite",st=>st.delete(id+":"+k));
+  scripts=scripts.filter(x=>x.id!==id);if(activeId===id){activeId=BE_ID;name=cur().name;lines=cur().lines;i=-1;await loadUserClips();show();}
+  saveScripts();renderScripts();say(`Dipadam: ${s.name}`,"skStatus");
+}
+function openEditor(id){
+  editingId=id;const s=id?scripts.find(x=>x.id===id):null;
+  $("edTitle").textContent=s?`Edit: ${s.name}`:"Skrip baru";$("nameIn").value=s?s.name:"";$("scriptIn").value=s?s.lines.join("\n"):"";
+  $("edWarn").hidden=!s;$("editor").hidden=false;$("bNewScript").hidden=true;$("nameIn").focus();
+}
+$("bNewScript").onclick=()=>openEditor(null);
+$("bEdCancel").onclick=()=>{$("editor").hidden=true;$("bNewScript").hidden=false;};
+$("bEdSave").onclick=async()=>{
+  const L=$("scriptIn").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  if(!L.length){say("Skrip kosong. Tulis sekurang-kurangnya satu ayat.","skStatus");return;}
+  const nm=$("nameIn").value.trim()||"Skrip aku";
+  let id=editingId;
+  if(id){const s=scripts.find(x=>x.id===id);s.name=nm;s.lines=L;s.t=Date.now();}
+  else{id="s"+Date.now().toString(36);scripts.push({id,name:nm,lines:L,t:Date.now()});}
+  if(id===BE_ID&&(nm!==BE_NAME||JSON.stringify(L)!==JSON.stringify(BE_LINES))){ // keep the original Bedah Enjin entry intact; save edits as a new script
+    const s=scripts.find(x=>x.id===BE_ID);s.name=BE_NAME;s.lines=BE_LINES;id="s"+Date.now().toString(36);scripts.push({id,name:nm,lines:L,t:Date.now()});}
+  saveScripts();$("editor").hidden=true;$("bNewScript").hidden=false;await useScript(id);
+};
+
+// ---------- line voices UI ----------
+async function loadUserClips(){for(const k in userClip)delete userClip[k];
+  await Promise.all(lines.map(async(_,n)=>{const b=await dbOp("clips","readonly",st=>st.get(activeId+":"+n));if(b)userClip[n]=b;}));}
+async function onPicked(f,n){
+  if(!f||n<0)return;userClip[n]=f;await dbOp("clips","readwrite",st=>st.put(f,activeId+":"+n));
+  say(`Suara untuk ayat ${n+1} disimpan.`);if(!$("pAyat").hidden)renderVoiceList();show();
+}
+$("filePick").onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value="";onPicked(f,fileFor);};
+$("fileRec").onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value="";onPicked(f,fileFor);};
+function renderVoiceList(){
+  const box=$("voList");box.textContent="";
+  lines.forEach((ln,n)=>{
+    const it=document.createElement("div");it.className="item";
+    const num=document.createElement("span");num.className="n";num.textContent=String(n+1).padStart(2,"0");
+    const t=document.createElement("span");t.className="t";t.textContent=strip(ln);
+    const sm=document.createElement("small");sm.textContent=userClip[n]?"Rakaman kau":isDefault()?"Suara asal":"Tiada suara";t.append(sm);
+    const acts=document.createElement("div");acts.className="acts";const hv=hasVoice(n);
+    const mk=(txt,label,fn,dis)=>{const b=document.createElement("button");b.type="button";b.textContent=txt;b.setAttribute("aria-label",label);b.disabled=!!dis;b.onclick=fn;return b;};
+    acts.append(
+      mk("▶",`Dengar ayat ${n+1}`,()=>{stopPlay();playLine(n,()=>{});},!hv),
+      mk("⬇",`Download ayat ${n+1}`,async()=>{say("Menyediakan…","ayStatus");const buf=await renderBuffers([await clipBuffer(n)],0);
+        await saveAudio(`${slug(name)}-ayat${String(n+1).padStart(2,"0")}-${presetId}`,buf,"ayStatus");},!hv),
+      mk("●",`Rakam ayat ${n+1}`,()=>{openPanel(null);i=n;mode="read";show();$("bRec").click();}),
+      mk("📁",`Pilih fail suara untuk ayat ${n+1}`,()=>{fileFor=n;$("filePick").click();})
+    );
+    if(userClip[n]){const del=mk("🗑",`Buang rakaman ayat ${n+1}`,null);confirmBtn(del,"Pasti?",async()=>{delete userClip[n];await dbOp("clips","readwrite",st=>st.delete(activeId+":"+n));renderVoiceList();show();});acts.append(del);}
+    it.append(num,t,acts);box.append(it);
+  });
+}
+$("bSaveAll").onclick=async()=>{
+  const idx=lines.map((_,n)=>n).filter(hasVoice);
+  if(!idx.length){say("Belum ada suara untuk disimpan.","ayStatus");return;}
+  say("Menggabungkan semua ayat…","ayStatus");
+  const bufs=[];for(const n of idx)bufs.push(await clipBuffer(n));
+  await saveAudio(`${slug(name)}-suara-penuh-${presetId}`,await renderBuffers(bufs,1.5),"ayStatus");
+};
+
+// ---------- import full recording and split by pauses ----------
+function sliceBuffer(buf,a,b){
+  const sr=buf.sampleRate,s0=Math.max(0,Math.floor(a*sr)),s1=Math.min(buf.length,Math.ceil(b*sr));
+  const out=new AudioBuffer({length:Math.max(1,s1-s0),numberOfChannels:1,sampleRate:sr});
+  const d=out.getChannelData(0);
+  for(let c=0;c<buf.numberOfChannels;c++){const src=buf.getChannelData(c);for(let k=s0;k<s1;k++)d[k-s0]+=src[k]/buf.numberOfChannels;}
+  const f=Math.min(Math.floor(0.02*sr),d.length>>1);for(let k=0;k<f;k++){d[k]*=k/f;d[d.length-1-k]*=k/f;}
+  return out;
+}
+// Finds speech regions, then keeps the (lines-1) longest pauses as the cuts between lines.
+function findLineCuts(buf,nLines){
+  const sr=buf.sampleRate,hop=Math.floor(sr*0.02),n=Math.floor(buf.length/hop),db=new Float32Array(n);
+  const chs=[];for(let c=0;c<buf.numberOfChannels;c++)chs.push(buf.getChannelData(c));
+  for(let f=0;f<n;f++){let e=0;for(let k=f*hop;k<(f+1)*hop;k++){let v=0;for(const ch of chs)v+=ch[k];v/=chs.length;e+=v*v;}db[f]=10*Math.log10(e/hop+1e-12);}
+  const sorted=[...db].sort((a,b)=>a-b),floor=sorted[Math.floor(n*0.1)],peak=sorted[Math.floor(n*0.99)];
+  const thr=Math.max(floor+8,peak-38);
+  let segs=[],on=false,st=0,quiet=0;
+  for(let f=0;f<n;f++){const v=db[f]>thr;
+    if(v){if(!on){on=true;st=f;}quiet=0;}
+    else if(on){quiet++;if(quiet*0.02>=0.3){segs.push([st*0.02,(f-quiet+1)*0.02]);on=false;}}}
+  if(on)segs.push([st*0.02,n*0.02]);
+  segs=segs.filter(([a,b])=>b-a>=0.25);
+  // drop isolated short blips (cough, false start, the word "ulang") that sit between long pauses
+  segs=segs.filter((sg,k)=>{const d=sg[1]-sg[0];if(d>=1.0)return true;
+    const before=k?sg[0]-segs[k-1][1]:99, after=k<segs.length-1?segs[k+1][0]-sg[1]:99;return !(before>=1.2&&after>=1.2);});
+  if(!segs.length) return [];
+  if(segs.length<=nLines) return segs;
+  const gaps=segs.slice(1).map((s,k)=>({k,len:s[0]-segs[k][1]}));
+  const cutAt=new Set(gaps.sort((a,b)=>b.len-a.len).slice(0,nLines-1).map(g=>g.k));
+  const groups=[];let cur=[...segs[0]];
+  for(let k=1;k<segs.length;k++){if(cutAt.has(k-1)){groups.push(cur);cur=[...segs[k]];}else cur[1]=segs[k][1];}
+  groups.push(cur);return groups;
+}
+async function splitIntoLines(file){
+  say("Membaca rakaman…","ayStatus");
+  const buf=await decodeBlob(file);
+  if(!buf){say("Fail ini tak dapat dibaca. Cuba format lain (m4a, mp3, wav).","ayStatus");return;}
+  const parts=findLineCuts(buf,lines.length);
+  if(!parts.length){say("Tiada suara dikesan dalam rakaman ini.","ayStatus");return;}
+  for(let n=0;n<Math.min(parts.length,lines.length);n++){
+    const [a,b]=parts[n];const blob=encodeWav(sliceBuffer(buf,a-0.12,b+0.18));
+    userClip[n]=blob;await dbOp("clips","readwrite",st=>st.put(blob,activeId+":"+n));
+  }
+  const msg=parts.length===lines.length?`Siap: ${lines.length} ayat dipecahkan. Dengar setiap ayat untuk semak.`
+    :`Dijumpai ${parts.length} bahagian untuk ${lines.length} ayat. Ayat tanpa padanan masih kosong; rakam semula ayat itu dengan ● atau 📁.`;
+  say(msg,"ayStatus");renderVoiceList();show();
+}
+$("bSplit").onclick=()=>$("fileSplit").click();
+$("fileSplit").onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(f)splitIntoLines(f);};
+$("bMicRead").onclick=()=>{openPanel(null);i=-1;go();};
+$("bMicImport").onclick=()=>{openPanel("pAyat");$("fileSplit").click();};
+
+// ---------- recordings library ----------
+const ORIG_ID="asal-19okt";
+async function libAll(){const all=(await dbOp("voices","readonly",st=>st.getAll()))||[];return all.sort((a,b)=>b.t-a.t);}
+async function libPut(v){await dbOp("voices","readwrite",st=>st.put(v));}
+async function libBlob(v){if(v.blob)return v.blob;if(v.id===ORIG_ID){if(!urlBlobs.orig)urlBlobs.orig=await fetchBlob(ORIG_URL());return urlBlobs.orig;}return null;}
+async function ensureOrig(){
+  if(NO_BUILTIN||LS.get("origAdded",false)) return;
+  await libPut({id:ORIG_ID,name:"Rakaman asal Bedah Enjin (19 Okt)",t:1,dur:0,builtin:true}); LS.set("origAdded",true);
+}
+let playingId=null;
+async function renderLib(){
+  $("tunePill2").textContent=`Tune: ${presetName()} · tukar`;
+  const box=$("rkList");box.textContent="";const all=await libAll();
+  if(!all.length){const p=document.createElement("p");p.textContent="Belum ada rakaman. Tekan + Upload rakaman atau ● Rakam baru.";box.append(p);return;}
+  for(const v of all){
+    const it=document.createElement("div");it.className="item";
+    const num=document.createElement("span");num.className="n";num.textContent="♪";
+    const t=document.createElement("span");t.className="t";
+    const nm=document.createElement("span");nm.textContent=v.name;t.append(nm);
+    const sm=document.createElement("small");sm.textContent=v.dur?fmtDur(v.dur):"";t.append(sm);
+    const acts=document.createElement("div");acts.className="acts";
+    const mk=(txt,fn,cls)=>{const b=document.createElement("button");b.type="button";b.textContent=txt;if(cls)b.className=cls;if(fn)b.onclick=fn;return b;};
+    const play=mk(playingId===v.id?"■ Henti":"▶ Dengar",async()=>{
+      if(playingId===v.id){stopAudio();return;}
+      say(`Memuatkan "${v.name}"…`,"rkStatus");const buf=await decodeBlob(await libBlob(v));
+      if(!buf){say("Fail ini tak dapat dibaca oleh phone. Cuba format lain (m4a, mp3, wav).","rkStatus");return;}
+      if(!v.dur){v.dur=buf.duration;libPut(v);sm.textContent=fmtDur(v.dur);}
+      playingId=v.id;play.textContent="■ Henti";say(`Main dengan tune ${presetName()}.`,"rkStatus");
+      playBuffer(buf,null,()=>{playingId=null;play.textContent="▶ Dengar";});
+    },"ghost");
+    const dl=mk("⬇ Download",async()=>{
+      say("Menyediakan…","rkStatus");const buf=await decodeBlob(await libBlob(v));
+      if(!buf){say("Fail ini tak dapat dibaca.","rkStatus");return;}
+      await saveAudio(`${slug(v.name)}-${presetId}`,await renderBuffers([buf],0),"rkStatus");
+    },"primary");
+    const ren=mk("✎",()=>{
+      const inp=document.createElement("input");inp.type="text";inp.value=v.name;inp.setAttribute("aria-label","Nama rakaman");
+      const ok=mk("Simpan",async()=>{v.name=inp.value.trim()||v.name;await libPut(v);renderLib();},"primary");
+      t.replaceChildren(inp);acts.replaceChildren(ok);inp.focus();
+    });
+    ren.setAttribute("aria-label","Tukar nama");
+    const del=mk("🗑",null,"danger");del.setAttribute("aria-label","Padam rakaman");
+    confirmBtn(del,"Pasti?",async()=>{if(playingId===v.id)stopAudio();await dbOp("voices","readwrite",st=>st.delete(v.id));if(v.id===ORIG_ID)LS.set("origAdded",true);renderLib();});
+    acts.append(play,dl,ren,del);it.append(num,t,acts);box.append(it);
+  }
+}
+$("bUpload").onclick=()=>$("fileLib").click();
+$("fileLib").onchange=async e=>{
+  const files=[...(e.target.files||[])];e.target.value="";
+  for(const f of files){const base=f.name.replace(/\.[^.]+$/,"")||"Rakaman";
+    await libPut({id:"v"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),name:base,blob:f,t:Date.now(),dur:0});}
+  if(files.length)say(`${files.length} rakaman ditambah.`,"rkStatus");renderLib();
+};
+let freeRec=null, freeParts=[];
+async function stopFreeRec(){
+  return new Promise(res=>{
+    if(!freeRec){res();return;}
+    const r=freeRec;freeRec=null;
+    r.onstop=async()=>{recIndicator(false);$("bRecFree").setAttribute("aria-pressed","false");$("bRecFree").textContent="● Rakam baru";
+      const blob=new Blob(freeParts,{type:r.mimeType||"audio/webm"});
+      if(blob.size){const d=new Date();const nm=`Rakaman ${d.getDate()}/${d.getMonth()+1} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+        await libPut({id:"v"+Date.now().toString(36),name:nm,blob,t:Date.now(),dur:(Date.now()-recStart)/1000});say(`Disimpan: ${nm}`,"rkStatus");}
+      renderLib();res();};
+    r.stop();
+  });
+}
+$("bRecFree").onclick=async()=>{
+  if(freeRec){await stopFreeRec();return;}
+  if(recSession){recSession=false;setRecBtn();await stopRec();}
+  stopAudio();
+  if(!(await ensureMic())){say("Mikrofon disekat dalam paparan ini. Rakam guna app perakam phone, kemudian tekan + Upload rakaman.","rkStatus");return;}
+  freeRec=newRecorder();freeParts=[];freeRec.ondataavailable=e=>e.data.size&&freeParts.push(e.data);freeRec.start();recIndicator(true);
+  $("bRecFree").setAttribute("aria-pressed","true");$("bRecFree").textContent="■ Henti & simpan";say("Merakam… tekan Henti & simpan bila habis.","rkStatus");
+};
+
+// ---------- tune UI ----------
+const presetName=()=>{const p=PRESETS.find(x=>x.id===presetId);return p?p.name:"Ubah suai";};
+function syncTunePill(){$("tunePill").textContent=`Tune: ${presetName()}`;}
+function renderTune(){
+  ["A","B","C"].forEach(g=>{const box=$("preset"+g);box.textContent="";
+    PRESETS.filter(p=>p.g===g).forEach(p=>{const b=document.createElement("button");b.type="button";b.setAttribute("aria-pressed",String(p.id===presetId));
+      b.append(p.name);const sm=document.createElement("small");sm.textContent=p.d;b.append(sm);
+      b.onclick=()=>{presetId=p.id;tune=Object.assign({},BASE,p.p);saveTune();renderTune();previewTune();};box.append(b);});});
+  $("kRate").value=tune.rate;$("oRate").textContent=tune.rate.toFixed(2)+"×";
+  $("kBass").value=tune.bass;$("oBass").textContent=(tune.bass>0?"+":"")+tune.bass+" dB";
+  $("kTreble").value=tune.treble;$("oTreble").textContent=(tune.treble>0?"+":"")+tune.treble+" dB";
+  $("kVerb").value=tune.verb;$("oVerb").textContent=Math.round(tune.verb*100)+"%";
+  $("kEcho").value=tune.echo;$("oEcho").textContent=Math.round(tune.echo*100)+"%";
+  $("kRobot").value=tune.ring;$("oRobot").textContent=Math.round(tune.ring*100)+"%";
+  const vibN=Math.min(1,tune.vib/0.006);$("kVib").value=vibN;$("oVib").textContent=Math.round(vibN*100)+"%";
+}
+function saveTune(){LS.set("tune",tune);LS.set("preset",presetId);syncTunePill();}
+const knob=(id,apply)=>{$(id).oninput=e=>{apply(+e.target.value);presetId="custom";saveTune();renderTune();};$(id).onchange=()=>previewTune();};
+knob("kRate",v=>tune.rate=v);knob("kBass",v=>tune.bass=v);knob("kTreble",v=>tune.treble=v);
+knob("kVerb",v=>{tune.verb=v;if(!tune.verbLen)tune.verbLen=1.2;});knob("kEcho",v=>tune.echo=v);
+knob("kRobot",v=>{tune.ring=v;tune.comp=true;});knob("kVib",v=>{tune.vib=v*0.006;if(!tune.vibHz)tune.vibHz=6;});
+async function previewSource(){
+  if(i>=0&&i<lines.length&&hasVoice(i))return clipBuffer(i);
+  const k=lines.findIndex((_,n)=>hasVoice(n));if(k>=0)return clipBuffer(k);
+  const all=await libAll();if(all.length)return decodeBlob(await libBlob(all[0]));
+  return null;
+}
+async function previewTune(){const buf=await previewSource();if(!buf){say("Rakam atau upload suara dulu untuk dengar tune.","tnStatus");return;}
+  say(`Mendengar: ${presetName()}`,"tnStatus");playBuffer(buf,()=>say("","tnStatus"));}
+$("bTuneTest").onclick=()=>previewTune();
+
+// ---------- boot ----------
+applySettings();syncTunePill();show();
+openDB().then(async db=>{idb=db;if(!db){say("Simpanan browser tak tersedia; rakaman tak akan diingat.");return;}await ensureOrig();await loadUserClips();show();});
+if(inViewer){window.claude.use("downloads").then(d=>{downloads=d;}).catch(()=>{});}
+})();
+</script>
+
+</body></html>
